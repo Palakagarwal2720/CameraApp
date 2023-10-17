@@ -2,6 +2,8 @@ package com.medium.cameraapp
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.view.ScaleGestureDetector
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -27,12 +29,14 @@ suspend fun Context.getCameraProvider(): ProcessCameraProvider = suspendCoroutin
     }
 }
 
+@SuppressLint("ClickableViewAccessibility")
 suspend fun Context.createVideoCaptureUseCase(
     lifecycleOwner: LifecycleOwner,
     cameraSelector: CameraSelector,
-    previewView: PreviewView
+    previewView: PreviewView,
+    context: Context
 ): VideoCapture<Recorder> {
-    val preview = Preview.Builder()
+    val preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9)
         .build()
         .apply { setSurfaceProvider(previewView.surfaceProvider) }
 
@@ -48,12 +52,38 @@ suspend fun Context.createVideoCaptureUseCase(
 
     val cameraProvider = getCameraProvider()
     cameraProvider.unbindAll()
-    cameraProvider.bindToLifecycle(
+    val camera = cameraProvider.bindToLifecycle(
         lifecycleOwner,
         cameraSelector,
         preview,
         videoCapture
     )
+    // Getting the CameraControl instance from the camera
+    val cameraControl = camera.cameraControl
+
+    val listener = object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            // Get the camera's current zoom ratio
+            val currentZoomRatio = camera.cameraInfo.zoomState.value?.zoomRatio ?: 0F
+
+            // Get the pinch gesture's scaling factor
+            val delta = detector.scaleFactor
+
+            // Update the camera's zoom ratio. This is an asynchronous operation that returns
+            // a ListenableFuture, allowing you to listen to when the operation completes.
+            cameraControl.setZoomRatio(currentZoomRatio * delta)
+
+            // Return true, as the event was handled
+            return true
+        }
+    }
+    val scaleGestureDetector = ScaleGestureDetector(context, listener)
+
+// Attach the pinch gesture listener to the viewfinder
+    previewView.setOnTouchListener { _, event ->
+        scaleGestureDetector.onTouchEvent(event)
+        return@setOnTouchListener true
+    }
 
     return videoCapture
 }
